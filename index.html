@@ -115,7 +115,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const okUrl=u=>/^https?:\/\//i.test(u||'');
 const okImg=u=>/^data:image\/(jpeg|png|webp);base64,/.test(u||'');
 let P=JSON.parse($('#d').textContent).products||[];
-let art=null,canEdit=false,busy=false;
+let canEdit=true,busy=false;
 
 const imgs=p=>(p.imgs||(p.img?[p.img]:[])).filter(okImg);
 function ph(p,k=0){const a=imgs(p);return a[k]?`<img src="${a[k]}" alt="${esc(p.n)}" loading="lazy">`:`<div class="sw" style="background:linear-gradient(160deg,${esc(p.c?.[0]||'#8a8494')},${esc(p.c?.[1]||'#3a3442')})"></div>`}
@@ -137,11 +137,34 @@ function serialize(){
   doc.getElementById('app').innerHTML='';doc.getElementById('layer').innerHTML='';
   return '<!doctype html>\n'+doc.documentElement.outerHTML;
 }
+const gh=()=>{let c={};try{c=JSON.parse(localStorage.getItem('aurel_gh')||'{}')}catch(e){}let t='';try{t=sessionStorage.getItem('aurel_tok')||''}catch(e){}return{repo:c.repo||'',path:c.path||'index.html',branch:c.branch||'main',token:t}};
+function dl(h){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([h],{type:'text/html'}));a.download='index.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+async function ghPut(c,html){
+  const u='https://api.github.com/repos/'+c.repo+'/contents/'+c.path.split('/').map(encodeURIComponent).join('/');
+  const h={Authorization:'Bearer '+c.token,Accept:'application/vnd.github+json'};
+  const g=await fetch(u+'?ref='+encodeURIComponent(c.branch),{headers:h});
+  if(!g.ok)throw new Error('GitHub couldn’t find that file ('+g.status+'). Check the repository, file path, branch and token.');
+  const sha=(await g.json()).sha,bytes=new TextEncoder().encode(html);let bin='';
+  for(let i=0;i<bytes.length;i+=32768)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+32768));
+  const r=await fetch(u,{method:'PUT',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({message:'Update store',content:btoa(bin),sha,branch:c.branch})});
+  if(!r.ok)throw new Error('GitHub refused the update ('+r.status+'). The token needs “Contents: Read and write” on this repository.');
+}
 async function save(){
   if(busy)return;busy=true;say('Publishing…');
-  try{await art.publish(serialize())}
-  catch(e){busy=false;say(e?.code==='conflict'?'Another edit was published first. Reload to continue.':'Couldn’t publish: '+(e?.message||'try again.'))}
+  const html=serialize(),c=gh();
+  try{
+    if(!c.repo||!c.token){dl(html);busy=false;say('GitHub isn’t set up yet, so the updated file was downloaded. Upload it to your repository as '+c.path+'.');return}
+    await ghPut(c,html);busy=false;render();admin();say('Published. GitHub Pages shows it in about a minute.');
+  }catch(e){busy=false;say(e.message||'Couldn’t publish.')}
 }
+const ghUI=()=>{const c=gh();return `<h3 style="font-size:22px;margin-top:22px">Publishing to GitHub</h3>
+  <p class="pr" style="margin:0;font-size:14px">Needed once. Use a token limited to this one repository with “Contents: Read and write”. It is kept only until you close this tab.</p>
+  <div class="fld"><label for="gr">Repository (owner/name)</label><input id="gr" value="${esc(c.repo)}" placeholder="yourname/your-repo"></div>
+  <div class="fld"><label for="gp">File path</label><input id="gp" value="${esc(c.path)}"></div>
+  <div class="fld"><label for="gb">Branch</label><input id="gb" value="${esc(c.branch)}"></div>
+  <div class="fld"><label for="gt">Access token</label><input id="gt" type="password" value="${esc(c.token)}" autocomplete="off"></div>
+  <button class="btn ghost" id="gs">Save settings</button><div class="st" id="gst" aria-live="polite"></div>`};
+const ghBind=()=>{$('#gs').onclick=()=>{try{localStorage.setItem('aurel_gh',JSON.stringify({repo:$('#gr').value.trim(),path:$('#gp').value.trim()||'index.html',branch:$('#gb').value.trim()||'main'}));sessionStorage.setItem('aurel_tok',$('#gt').value.trim());$('#gst').textContent='Saved.'}catch(e){$('#gst').textContent='Couldn’t save settings.'}}};
 function say(m){const s=$('#st');if(s)s.textContent=m}
 function shrink(f){return new Promise((res,rej)=>{const im=new Image(),u=URL.createObjectURL(f);im.onload=()=>{const k=Math.min(1,900/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);res(c.toDataURL('image/jpeg',.82))};im.onerror=()=>rej(new Error('Unreadable image'));im.src=u})}
 
@@ -167,7 +190,7 @@ function admin(){
   <div class="fld"><span>Photos (up to 8)</span><label class="addph" for="af"><span class="plus" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="14" height="13" rx="2"/><path d="M7 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><circle cx="8" cy="11.5" r="1.2"/><path d="m3 17 4-3.5 4 3.5 3-2.5"/></svg></span><span id="afn">Add photos</span></label><input id="af" type="file" accept="image/*" multiple><div id="pv" class="pv"></div></div>
   <button class="btn" id="add">Add and publish</button><div class="st" id="st" aria-live="polite"></div>
   <h3 style="font-size:22px;margin-top:20px">Your pieces</h3>
-  ${P.map((p,i)=>`<div class="row"><div class="t">${ph(p)}</div><span class="nm">${esc(p.n)}</span><span><button data-edit="${i}">Edit</button> <button data-del="${i}">Remove</button></span></div>`).join('')||'<p class="pr">No pieces yet.</p>'}`,'adm');
+  ${P.map((p,i)=>`<div class="row"><div class="t">${ph(p)}</div><span class="nm">${esc(p.n)}</span><span><button data-edit="${i}">Edit</button> <button data-del="${i}">Remove</button></span></div>`).join('')||'<p class="pr">No pieces yet.</p>'}${ghUI()}`,'adm');ghBind();
   let pend=[];
   const paint=()=>{const n=pend.length;$('#afn').textContent=n?`${n} of 8 selected · add more`:'Add photos';$('#pv').innerHTML=pend.map((f,k)=>`<span class="pvt"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" data-rm="${k}" aria-label="Remove photo ${k+1}">×</button></span>`).join('');$('#pv').querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{pend.splice(+b.dataset.rm,1);paint()})};
   $('#af').onchange=()=>{pend=[...pend,...$('#af').files].slice(0,8);$('#af').value='';paint()};
@@ -200,7 +223,7 @@ $('#adminBtn').onclick=()=>unlocked()?admin():login();
 ['contextmenu','copy','cut','dragstart','selectstart'].forEach(t=>document.addEventListener(t,e=>{if(!e.target.closest||!e.target.closest('input,textarea'))e.preventDefault()}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')close();if(window.galGo){if(e.key==='ArrowLeft')window.galGo(-1);if(e.key==='ArrowRight')window.galGo(1)}});
 render();
-(async()=>{try{if(!window.claude)return;const u=await claude.use('user');art=await claude.use('artifact');canEdit=!!(u&&u.canEdit()&&art);render()}catch(e){}})();
+
 </script>
 
 
